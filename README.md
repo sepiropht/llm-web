@@ -5,6 +5,8 @@ machine into one Kimi / ChatGPT-style chat interface. Built for mobile.
 
 A universal equivalent of `kimi web`, but multi-provider.
 
+![LLM Web — every agent session in one mobile-friendly interface](docs/screenshot.png)
+
 ## Why do you need this?
 
 I mostly run coding agents (Claude Code, Kimi, Grok, …) on a **VPS**. The problem is
