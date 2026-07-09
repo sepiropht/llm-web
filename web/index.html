@@ -132,6 +132,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
   display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .send:disabled{opacity:.4;cursor:default}
 .hint{font-size:11px;color:var(--text-faint);text-align:center;margin-top:7px}
+.quick{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 8px;max-width:760px;padding:0 2px}
+.quick-btn{font-size:13.5px;padding:8px 14px;border-radius:20px;border:1px solid var(--accent);
+  background:var(--bg);color:var(--accent);cursor:pointer;text-align:left;line-height:1.35;
+  max-width:100%;transition:background .12s}
+.quick-btn:hover{background:var(--accent);color:#fff}
 
 .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--text-faint);text-align:center;padding:20px}
 .empty h2{color:var(--text);font-size:20px;margin:0}

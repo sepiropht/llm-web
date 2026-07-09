@@ -137,6 +137,8 @@ func newCLIParser(inner lineFn) lineFn {
 			return "", "", false
 		}
 		switch kind {
+		case "session":
+			return "session", text, true
 		case "delta":
 			sawDelta = true
 			return "token", text, true
@@ -182,10 +184,16 @@ func runCLI(ctx context.Context, s *sse, cwd, bin string, args []string, transfo
 	sc.Buffer(make([]byte, 1024*1024), 32*1024*1024)
 	got := false
 	for sc.Scan() {
-		if kind, text, ok := transform(sc.Text()); ok && text != "" {
-			got = true
-			s.send(kind, text)
+		kind, text, ok := transform(sc.Text())
+		if !ok || text == "" {
+			continue
 		}
+		if kind == "session" {
+			s.send("session", text) // ID natif → le front pourra reprendre ce fil
+			continue
+		}
+		got = true
+		s.send(kind, text)
 	}
 	err = cmd.Wait()
 	if err != nil && !got {
@@ -210,6 +218,12 @@ func claudeStreamLine(line string) (string, string, bool) {
 	var t string
 	json.Unmarshal(o["type"], &t)
 	switch t {
+	case "system":
+		var sid string
+		json.Unmarshal(o["session_id"], &sid)
+		if sid != "" {
+			return "session", sid, true
+		}
 	case "stream_event":
 		return claudeStreamEvent(o["event"])
 	case "assistant":
@@ -271,6 +285,13 @@ func kimiStreamLine(line string) (string, string, bool) {
 	}
 	var t string
 	json.Unmarshal(o["type"], &t)
+	if t == "session.resume_hint" || t == "system" {
+		var sid string
+		json.Unmarshal(o["session_id"], &sid)
+		if sid != "" {
+			return "session", sid, true
+		}
+	}
 	if t == "assistant" || t == "context.append_message" {
 		if raw, ok := o["message"]; ok {
 			parts := kimiParts(messageContent(raw))
