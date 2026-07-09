@@ -105,7 +105,11 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	case "qwen":
 		runCLI(ctx, s, cwd, "qwen", []string{req.Message}, plainLine)
 	case "grok":
-		runXAI(ctx, s, req)
+		if binExists("grok") {
+			runCLI(ctx, s, cwd, "grok", grokArgs(req, bypassPermissions), newCLIParser(grokStreamLine))
+		} else {
+			runXAI(ctx, s, req) // repli sur l'API xAI si le CLI n'est pas installé
+		}
 	case "mistral":
 		runMistral(ctx, s, req)
 	default:
@@ -133,6 +137,47 @@ func claudeArgs(req chatRequest) []string {
 		args = append(args, "--model", req.Model)
 	}
 	return args
+}
+
+func grokArgs(req chatRequest, bypass bool) []string {
+	args := []string{"-p", req.Message, "--output-format", "streaming-json"}
+	if req.NativeID != "" {
+		args = append(args, "-r", req.NativeID)
+	}
+	if bypass {
+		args = append(args, "--permission-mode", "bypassPermissions")
+	}
+	if req.Model != "" {
+		args = append(args, "-m", req.Model)
+	}
+	return args
+}
+
+// grokStreamLine parses one line of `grok --output-format streaming-json`.
+func grokStreamLine(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || line[0] != '{' {
+		return "", "", false
+	}
+	var o struct {
+		Type      string `json:"type"`
+		Data      string `json:"data"`
+		SessionID string `json:"sessionId"`
+	}
+	if json.Unmarshal([]byte(line), &o) != nil {
+		return "", "", false
+	}
+	switch o.Type {
+	case "text":
+		if o.Data != "" {
+			return "delta", o.Data, true
+		}
+	case "end":
+		if o.SessionID != "" {
+			return "session", o.SessionID, true
+		}
+	}
+	return "", "", false
 }
 
 func kimiArgs(req chatRequest) []string {

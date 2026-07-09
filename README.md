@@ -10,11 +10,12 @@ dans une interface de chat à la Kimi / ChatGPT. Pensée pour le mobile.
 - **Agrège les sessions** de tous les CLI LLM détectés :
   - **Claude Code** — `~/.claude/projects/*/*.jsonl`
   - **Kimi Code** — `~/.kimi-code/sessions/wd_*/ses_*/`
+  - **Grok (xAI CLI)** — `~/.grok/sessions/<cwd>/<uuid>/`
   - **Gemini** — `~/.gemini/tmp/*/logs.json`
 - **Chat live** avec n'importe quel LLM installé (nouveau chat ou reprise de session) :
-  - Claude, Kimi (CLI, avec streaming + reprise `--resume` / `-S`)
+  - Claude, Kimi, Grok (CLI, avec streaming + reprise `--resume` / `-S` / `-r`)
   - Qwen (modèle local llama.cpp)
-  - Grok (xAI) et Mistral (API — clé requise)
+  - Mistral, et Grok en repli API xAI si le CLI n'est pas là (clé requise)
 - UI type ChatGPT : sidebar des sessions groupées par date, recherche, filtres par LLM,
   rendu markdown, blocs de raisonnement et appels d'outils repliables, thème clair/sombre,
   **responsive mobile**, rafraîchissement auto.

@@ -186,6 +186,109 @@ func kimiParts(raw json.RawMessage) []Part {
 	return parts
 }
 
+// grokParts converts one grok chat_history.jsonl entry into renderable parts.
+func grokParts(t string, o map[string]json.RawMessage) ([]Part, string) {
+	switch t {
+	case "user":
+		txt := grokUserText(o["content"])
+		if txt == "" {
+			return nil, ""
+		}
+		return []Part{{Type: "text", Text: txt}}, "user"
+	case "reasoning":
+		txt := grokReasoning(o["summary"])
+		if txt == "" {
+			return nil, ""
+		}
+		return []Part{{Type: "think", Text: txt}}, "assistant"
+	case "assistant":
+		var parts []Part
+		var content string
+		json.Unmarshal(o["content"], &content)
+		if strings.TrimSpace(content) != "" {
+			parts = append(parts, Part{Type: "text", Text: content})
+		}
+		var calls []struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}
+		json.Unmarshal(o["tool_calls"], &calls)
+		for _, c := range calls {
+			parts = append(parts, Part{Type: "tool", Name: c.Name, Data: c.Arguments})
+		}
+		if len(parts) == 0 {
+			return nil, ""
+		}
+		return parts, "assistant"
+	case "tool_result":
+		data := contentToString(o["content"])
+		if data == "" {
+			return nil, ""
+		}
+		return []Part{{Type: "tool_result", Data: data}}, "assistant"
+	}
+	return nil, ""
+}
+
+func extractGrokContent(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &blocks) == nil {
+		var sb strings.Builder
+		for _, b := range blocks {
+			if b.Type == "text" || b.Text != "" {
+				sb.WriteString(b.Text)
+				sb.WriteByte(' ')
+			}
+		}
+		return strings.TrimSpace(sb.String())
+	}
+	return ""
+}
+
+// grokUserText nettoie les blocs de contexte injectés par grok (<user_info>,
+// <git_status>, …) pour ne garder que le vrai message humain.
+func grokUserText(raw json.RawMessage) string {
+	txt := extractGrokContent(raw)
+	// le vrai prompt est dans <user_query> quand il est présent
+	if i := strings.Index(txt, "<user_query>"); i >= 0 {
+		rest := txt[i+len("<user_query>"):]
+		if j := strings.Index(rest, "</user_query>"); j >= 0 {
+			return strings.TrimSpace(rest[:j])
+		}
+		return strings.TrimSpace(rest)
+	}
+	// sinon : un vrai message humain ne commence pas par une balise. Si après
+	// trim le texte commence par "<", c'est un bundle de contexte injecté
+	// (<rules>, <git_status>, <agent_skills>…) → on le saute.
+	txt = strings.TrimSpace(txt)
+	if strings.HasPrefix(txt, "<") {
+		return ""
+	}
+	return txt
+}
+
+func grokReasoning(raw json.RawMessage) string {
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	json.Unmarshal(raw, &blocks)
+	var sb strings.Builder
+	for _, b := range blocks {
+		if b.Text != "" {
+			sb.WriteString(b.Text)
+			sb.WriteByte('\n')
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
 func rawToString(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

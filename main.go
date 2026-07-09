@@ -187,7 +187,7 @@ func handleProviders(w http.ResponseWriter, r *http.Request) {
 		hs := hasSess
 		// chat-only providers technically implement List but return nil; flag by name
 		switch p.Name() {
-		case "grok", "mistral", "qwen":
+		case "mistral", "qwen":
 			hs = false
 		}
 		items = append(items, providerInfo{

@@ -130,10 +130,10 @@ type ClaudeProvider struct {
 func NewClaudeProvider() *ClaudeProvider {
 	return &ClaudeProvider{root: filepath.Join(home(), ".claude", "projects"), cache: newFileCache()}
 }
-func (p *ClaudeProvider) Name() string      { return "claude" }
-func (p *ClaudeProvider) Available() bool    { _, err := os.Stat(p.root); return err == nil }
-func (p *ClaudeProvider) CanResume() bool    { return binExists("claude") }
-func (p *ClaudeProvider) CanChat() bool      { return binExists("claude") }
+func (p *ClaudeProvider) Name() string    { return "claude" }
+func (p *ClaudeProvider) Available() bool { _, err := os.Stat(p.root); return err == nil }
+func (p *ClaudeProvider) CanResume() bool { return binExists("claude") }
+func (p *ClaudeProvider) CanChat() bool   { return binExists("claude") }
 
 func (p *ClaudeProvider) List() []Session {
 	var files []string
@@ -282,7 +282,7 @@ type KimiProvider struct {
 func NewKimiProvider() *KimiProvider {
 	return &KimiProvider{root: filepath.Join(home(), ".kimi-code", "sessions"), cache: newFileCache()}
 }
-func (p *KimiProvider) Name() string   { return "kimi" }
+func (p *KimiProvider) Name() string    { return "kimi" }
 func (p *KimiProvider) Available() bool { _, err := os.Stat(p.root); return err == nil }
 func (p *KimiProvider) CanResume() bool { return binExists("kimi") }
 func (p *KimiProvider) CanChat() bool   { return binExists("kimi") }
@@ -324,11 +324,11 @@ func (p *KimiProvider) List() []Session {
 }
 
 type kimiState struct {
-	CreatedAt    string `json:"createdAt"`
-	UpdatedAt    string `json:"updatedAt"`
-	Title        string `json:"title"`
-	LastPrompt   string `json:"lastPrompt"`
-	Custom       struct {
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
+	Title      string `json:"title"`
+	LastPrompt string `json:"lastPrompt"`
+	Custom     struct {
 		Archived bool `json:"archived"`
 	} `json:"custom"`
 }
@@ -438,7 +438,7 @@ type GeminiProvider struct{ root string }
 func NewGeminiProvider() *GeminiProvider {
 	return &GeminiProvider{root: filepath.Join(home(), ".gemini", "tmp")}
 }
-func (p *GeminiProvider) Name() string   { return "gemini" }
+func (p *GeminiProvider) Name() string    { return "gemini" }
 func (p *GeminiProvider) Available() bool { _, err := os.Stat(p.root); return err == nil }
 func (p *GeminiProvider) CanResume() bool { return false }
 func (p *GeminiProvider) CanChat() bool   { return binExists("gemini") }
@@ -525,6 +525,132 @@ func (p *GeminiProvider) Messages(path string) ([]Message, error) {
 }
 
 // ============================================================
+// Grok (xAI CLI)  ~/.grok/sessions/<enc-cwd>/<uuid>/{summary.json, chat_history.jsonl}
+// ============================================================
+
+type GrokProvider struct {
+	root  string
+	cache *fileCache
+}
+
+func NewGrokProvider() *GrokProvider {
+	return &GrokProvider{root: filepath.Join(home(), ".grok", "sessions"), cache: newFileCache()}
+}
+func (p *GrokProvider) Name() string    { return "grok" }
+func (p *GrokProvider) Available() bool { return binExists("grok") }
+func (p *GrokProvider) CanResume() bool { return binExists("grok") }
+func (p *GrokProvider) CanChat() bool   { return binExists("grok") }
+
+func (p *GrokProvider) List() []Session {
+	var dirs []string
+	cwds, _ := os.ReadDir(p.root)
+	for _, cwd := range cwds {
+		if !cwd.IsDir() {
+			continue
+		}
+		sess, _ := os.ReadDir(filepath.Join(p.root, cwd.Name()))
+		for _, s := range sess {
+			if s.IsDir() {
+				dirs = append(dirs, filepath.Join(p.root, cwd.Name(), s.Name()))
+			}
+		}
+	}
+	var out []Session
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 16)
+	for _, d := range dirs {
+		wg.Add(1)
+		go func(dir string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if s, ok := p.summarize(dir); ok {
+				mu.Lock()
+				out = append(out, s)
+				mu.Unlock()
+			}
+		}(d)
+	}
+	wg.Wait()
+	sort.Slice(out, func(i, j int) bool { return out[i].updatedUnix > out[j].updatedUnix })
+	return out
+}
+
+type grokSummary struct {
+	Info struct {
+		ID  string `json:"id"`
+		Cwd string `json:"cwd"`
+	} `json:"info"`
+	Summary   string `json:"session_summary"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	NumChat   int    `json:"num_chat_messages"`
+}
+
+func (p *GrokProvider) summarize(dir string) (Session, bool) {
+	b, err := os.ReadFile(filepath.Join(dir, "summary.json"))
+	if err != nil {
+		return Session{}, false
+	}
+	var st grokSummary
+	if json.Unmarshal(b, &st) != nil {
+		return Session{}, false
+	}
+	upd := st.UpdatedAt
+	var updUnix int64
+	if t, err := time.Parse(time.RFC3339, upd); err == nil {
+		updUnix = t.Unix()
+	} else if info, err := os.Stat(filepath.Join(dir, "chat_history.jsonl")); err == nil {
+		updUnix = info.ModTime().Unix()
+		upd = info.ModTime().Format(time.RFC3339)
+	}
+	title := st.Summary
+	if title == "" {
+		title = "(sans titre)"
+	}
+	return Session{
+		ID:           encodeID("grok", dir),
+		Provider:     "grok",
+		NativeID:     st.Info.ID,
+		Title:        title,
+		Project:      filepath.Base(st.Info.Cwd),
+		Cwd:          st.Info.Cwd,
+		CreatedAt:    st.CreatedAt,
+		UpdatedAt:    upd,
+		MessageCount: st.NumChat,
+		updatedUnix:  updUnix,
+	}, true
+}
+
+func (p *GrokProvider) Messages(dir string) ([]Message, error) {
+	f, err := os.Open(filepath.Join(dir, "chat_history.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var out []Message
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1024*1024), 32*1024*1024)
+	i := 0
+	for sc.Scan() {
+		var o map[string]json.RawMessage
+		if json.Unmarshal(sc.Bytes(), &o) != nil {
+			continue
+		}
+		var t string
+		json.Unmarshal(o["type"], &t)
+		parts, role := grokParts(t, o)
+		if len(parts) == 0 {
+			continue
+		}
+		i++
+		out = append(out, Message{ID: itoa(i), Role: role, Parts: parts})
+	}
+	return out, nil
+}
+
+// ============================================================
 // Chat-only providers (no browsable local sessions)
 // ============================================================
 
@@ -533,18 +659,15 @@ type chatOnlyProvider struct {
 	canChat func() bool
 }
 
-func (p *chatOnlyProvider) Name() string      { return p.name }
-func (p *chatOnlyProvider) Available() bool    { return p.canChat() }
-func (p *chatOnlyProvider) CanResume() bool    { return false }
-func (p *chatOnlyProvider) CanChat() bool      { return p.canChat() }
-func (p *chatOnlyProvider) List() []Session    { return nil }
+func (p *chatOnlyProvider) Name() string    { return p.name }
+func (p *chatOnlyProvider) Available() bool { return p.canChat() }
+func (p *chatOnlyProvider) CanResume() bool { return false }
+func (p *chatOnlyProvider) CanChat() bool   { return p.canChat() }
+func (p *chatOnlyProvider) List() []Session { return nil }
 func (p *chatOnlyProvider) Messages(string) ([]Message, error) {
 	return nil, nil
 }
 
-func NewGrokProvider() Provider {
-	return &chatOnlyProvider{name: "grok", canChat: func() bool { return os.Getenv("GROK_API_KEY") != "" || os.Getenv("XAI_API_KEY") != "" }}
-}
 func NewMistralProvider() Provider {
 	return &chatOnlyProvider{name: "mistral", canChat: func() bool { return os.Getenv("MISTRAL_API_KEY") != "" }}
 }
