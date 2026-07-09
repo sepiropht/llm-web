@@ -1,92 +1,114 @@
 # LLM Web
 
-Une app web unique qui rassemble **toutes tes sessions de tous les LLM installés** sur la machine,
-dans une interface de chat à la Kimi / ChatGPT. Pensée pour le mobile.
+A single web app that gathers **all your sessions from every LLM CLI installed** on a
+machine into one Kimi / ChatGPT-style chat interface. Built for mobile.
 
-Équivalent universel de `kimi web`, mais multi-provider.
+A universal equivalent of `kimi web`, but multi-provider.
 
-## Ce que ça fait
+## Why do you need this?
 
-- **Agrège les sessions** de tous les CLI LLM détectés :
+I mostly run coding agents (Claude Code, Kimi, Grok, …) on a **VPS**. The problem is
+getting back to them from a **phone**: `ssh + claude` in a mobile terminal is painful —
+tiny text, no scrollback, fiddly keyboard, and every agent stores its history in its own
+place so you can never find that conversation from last week.
+
+LLM Web fixes that. Point it at your VPS, open the URL on your phone, and you get a clean,
+touch-friendly interface over **all** your agents: browse every past session, resume the
+one you need, or start a new chat with any installed model — no SSH, no terminal gymnastics.
+
+## What it does
+
+- **Aggregates the sessions** of every detected LLM CLI:
   - **Claude Code** — `~/.claude/projects/*/*.jsonl`
   - **Kimi Code** — `~/.kimi-code/sessions/wd_*/ses_*/`
   - **Grok (xAI CLI)** — `~/.grok/sessions/<cwd>/<uuid>/`
+  - **Codex** — `~/.codex/sessions/`
   - **Gemini** — `~/.gemini/tmp/*/logs.json`
-- **Chat live** avec n'importe quel LLM installé (nouveau chat ou reprise de session) :
-  - Claude, Kimi, Grok (CLI, avec streaming + reprise `--resume` / `-S` / `-r`)
-  - Qwen (modèle local llama.cpp)
-  - Mistral, et Grok en repli API xAI si le CLI n'est pas là (clé requise)
-- UI type ChatGPT : sidebar des sessions groupées par date, recherche, filtres par LLM,
-  rendu markdown, blocs de raisonnement et appels d'outils repliables, thème clair/sombre,
-  **responsive mobile**, rafraîchissement auto.
+- **Live chat** with any installed LLM (new chat or resume a session):
+  - Claude, Kimi, Grok, Codex (CLI, with streaming + resume `--resume` / `-S` / `-r`)
+  - Qwen (local llama.cpp model)
+  - Mistral, and Grok falls back to the xAI API if the CLI is absent (key required)
+- ChatGPT-style UI: sessions grouped by date, search, per-LLM filters, markdown rendering,
+  collapsible reasoning and tool-call blocks, light/dark theme, **mobile responsive**,
+  auto-refresh.
 
-## Lancer
+## Run
 
 ```bash
 ~/llm-web.sh
 ```
 
-Le script compile si besoin, génère un token persistant (URL stable), et expose le serveur
-sur toutes les interfaces (accès mobile via netbird). Il affiche l'URL avec le token.
+The script builds if needed, generates a persistent token (stable URL), and exposes the
+server on all interfaces (mobile access over a VPN like netbird). It prints the URL.
 
-### Manuellement
+### Install as a service (recommended for a VPS)
 
 ```bash
 cd ~/code/go/llm-web
-go build -o llmweb .
-./llmweb -port 18800                 # localhost seulement
-./llmweb -port 18800 -host 0.0.0.0   # exposé (accès réseau/mobile)
+./install.sh                    # safe defaults: token required, agents ask before acting
+NO_AUTH=1 BYPASS=1 ./install.sh # personal box behind a VPN: no token, agents auto-run
 ```
 
-Options : `-port`, `-host` (vide = 127.0.0.1 ; `0.0.0.0` = toutes interfaces), `-token`.
+Installs a systemd user service (survives reboot via linger). Options are remembered in
+`~/.llm-web/env`; edit that file and `systemctl --user restart llm-web` to change them.
+
+### Manually
+
+```bash
+go build -o llmweb .
+./llmweb -port 18800                 # localhost only
+./llmweb -port 18800 -host 0.0.0.0   # exposed (network / mobile access)
+```
+
+Flags: `-port`, `-host` (empty = 127.0.0.1; `0.0.0.0` = all interfaces), `-token`,
+`-no-auth`, `-bypass-permissions`.
 
 ## Auth
 
-Token bearer. Ouvre l'URL avec `#token=…` (le front le mémorise puis l'envoie en `Authorization: Bearer`).
-Toutes les routes `/api/*` l'exigent ; l'UI statique non.
+Bearer token. Open the URL with `#token=…` (the frontend stores it, then sends it as
+`Authorization: Bearer`). All `/api/*` routes require it; the static UI does not.
 
-## Permissions (exécution des outils)
+With `-no-auth`, clients on a **private/VPN network** (loopback, RFC1918, CGNAT `100.64/10`
+used by netbird/tailscale) skip the token; public clients still need it. This is what makes
+the phone-over-VPN flow tokenless while staying safe from the open internet.
 
-Quand tu chattes avec Claude, il peut vouloir lancer des outils (Bash, écriture de
-fichiers…). Deux modes, choisis dans le composer :
+## Permissions (tool execution)
 
-- **🔒 Demander** — Claude s'arrête avant chaque action et l'UI affiche une popup
-  *Autoriser / Refuser* (protocole bidirectionnel `--input-format stream-json`).
-  C'est le mode **par défaut et sûr**.
-- **⚡ Auto** — Claude exécute sans demander (`--permission-mode bypassPermissions`).
+When you chat with Claude it may want to run tools (Bash, file writes…). Two modes, chosen
+in the composer:
 
-Règle de sécurité côté serveur : le mode **Auto n'est disponible que si le serveur est
-lancé avec `-bypass-permissions`**. Un clone lancé sans ce flag force toujours
-« Demander », quelle que soit la requête du client — un déploiement public est donc sûr
-par défaut. Kimi, lui, exécute déjà les outils en mode `-p` (pas de canal de permission).
+- **🔒 Ask** — Claude pauses before each action and the UI shows an *Allow / Deny* popup
+  (bidirectional `--input-format stream-json` control protocol). This is the **safe default**.
+- **⚡ Auto** — Claude runs without asking (`--permission-mode bypassPermissions`).
 
-```bash
-./llmweb -port 18800                     # sûr : popup de permission obligatoire
-./llmweb -port 18800 -bypass-permissions # autorise le mode Auto (machine perso)
-```
+Server-side safety rule: **Auto is only available when the server is started with
+`-bypass-permissions`**. A clone launched without that flag always forces "Ask", whatever the
+client requests — so a public deployment is safe by default. (Kimi already runs tools in `-p`
+mode, with no permission channel.)
 
-## Clés API (Grok / Mistral)
+## API keys (Grok / Mistral)
 
-Mets tes clés dans `~/.llm-web/keys.env` :
+Put your keys in `~/.llm-web/keys.env`:
 
 ```bash
 GROK_API_KEY=xai-...
 MISTRAL_API_KEY=...
 ```
 
-Elles activent le "nouveau chat" pour ces providers.
+They enable "new chat" for those providers.
 
-## API (façonnée comme celle de kimi web)
+## API (shaped like kimi web's)
 
-- `GET  /api/v1/providers` — LLM détectés + capacités
-- `GET  /api/v1/sessions?q=&provider=&archived=1&limit=` — sessions agrégées
-- `GET  /api/v1/sessions/{id}/messages` — messages d'une session
-- `POST /api/v1/chat` — chat en streaming (SSE) `{provider, message, native_id?, cwd?, mode?}` ; events : `run`, `token`, `tool`, `ask`, `session`, `error`, `done`
-- `POST /api/v1/permission` — réponse à une demande d'outil `{run_id, request_id, allow}`
+- `GET  /api/v1/providers` — detected LLMs + capabilities
+- `GET  /api/v1/sessions?q=&provider=&archived=1&limit=` — aggregated sessions
+- `GET  /api/v1/sessions/{id}/messages` — a session's messages
+- `POST /api/v1/chat` — streaming chat (SSE) `{provider, message, native_id?, cwd?, mode?}`;
+  events: `run`, `token`, `tool`, `ask`, `session`, `error`, `done`
+- `POST /api/v1/permission` — answer a tool request `{run_id, request_id, allow}`
 - `GET  /api/v1/config`
 
 ## Architecture
 
-Binaire Go unique, `net/http` stdlib, UI embarquée (`//go:embed`). Un adaptateur par provider
-(`providers.go`) expose `List()` / `Messages()` ; le streaming de chat est dans `chat.go`.
-Ajouter un LLM = ajouter un adaptateur.
+Single Go binary, `net/http` stdlib, embedded UI (`//go:embed`). One adapter per provider
+(`providers.go`) exposing `List()` / `Messages()`; chat streaming lives in `chat.go`.
+Adding an LLM = adding an adapter.
