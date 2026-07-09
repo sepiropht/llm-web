@@ -44,6 +44,26 @@ Options : `-port`, `-host` (vide = 127.0.0.1 ; `0.0.0.0` = toutes interfaces), `
 Token bearer. Ouvre l'URL avec `#token=…` (le front le mémorise puis l'envoie en `Authorization: Bearer`).
 Toutes les routes `/api/*` l'exigent ; l'UI statique non.
 
+## Permissions (exécution des outils)
+
+Quand tu chattes avec Claude, il peut vouloir lancer des outils (Bash, écriture de
+fichiers…). Deux modes, choisis dans le composer :
+
+- **🔒 Demander** — Claude s'arrête avant chaque action et l'UI affiche une popup
+  *Autoriser / Refuser* (protocole bidirectionnel `--input-format stream-json`).
+  C'est le mode **par défaut et sûr**.
+- **⚡ Auto** — Claude exécute sans demander (`--permission-mode bypassPermissions`).
+
+Règle de sécurité côté serveur : le mode **Auto n'est disponible que si le serveur est
+lancé avec `-bypass-permissions`**. Un clone lancé sans ce flag force toujours
+« Demander », quelle que soit la requête du client — un déploiement public est donc sûr
+par défaut. Kimi, lui, exécute déjà les outils en mode `-p` (pas de canal de permission).
+
+```bash
+./llmweb -port 18800                     # sûr : popup de permission obligatoire
+./llmweb -port 18800 -bypass-permissions # autorise le mode Auto (machine perso)
+```
+
 ## Clés API (Grok / Mistral)
 
 Mets tes clés dans `~/.llm-web/keys.env` :
@@ -60,7 +80,8 @@ Elles activent le "nouveau chat" pour ces providers.
 - `GET  /api/v1/providers` — LLM détectés + capacités
 - `GET  /api/v1/sessions?q=&provider=&archived=1&limit=` — sessions agrégées
 - `GET  /api/v1/sessions/{id}/messages` — messages d'une session
-- `POST /api/v1/chat` — chat en streaming (SSE) `{provider, message, native_id?, cwd?}`
+- `POST /api/v1/chat` — chat en streaming (SSE) `{provider, message, native_id?, cwd?, mode?}` ; events : `run`, `token`, `tool`, `ask`, `session`, `error`, `done`
+- `POST /api/v1/permission` — réponse à une demande d'outil `{run_id, request_id, allow}`
 - `GET  /api/v1/config`
 
 ## Architecture

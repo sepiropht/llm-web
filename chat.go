@@ -19,6 +19,25 @@ type chatRequest struct {
 	NativeID string `json:"native_id"` // resume target (optional)
 	Cwd      string `json:"cwd"`
 	Model    string `json:"model"`
+	Mode     string `json:"mode"` // "ask" (popup permission) | "auto" (bypass) | "" (défaut serveur)
+}
+
+// effectiveMode applique la règle de sécurité : sans -bypass-permissions, le
+// serveur force toujours "ask" (popup), quel que soit le souhait du client — un
+// clone public est donc sûr par défaut.
+func effectiveMode(req chatRequest) string {
+	m := req.Mode
+	if m == "" {
+		if bypassPermissions {
+			m = "auto"
+		} else {
+			m = "ask"
+		}
+	}
+	if m == "auto" && !bypassPermissions {
+		m = "ask"
+	}
+	return m
 }
 
 // sse is a tiny server-sent-events helper.
@@ -70,9 +89,17 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		cwd = home()
 	}
 
+	runID := randToken()[:16]
+	s.send("run", runID)
+	mode := effectiveMode(req)
+
 	switch req.Provider {
 	case "claude":
-		runCLI(ctx, s, cwd, "claude", claudeArgs(req), newCLIParser(claudeStreamLine))
+		if mode == "ask" {
+			runClaudeInteractive(ctx, s, cwd, req.Message, req.NativeID, req.Model, runID)
+		} else {
+			runCLI(ctx, s, cwd, claudeBin(), claudeArgs(req), newCLIParser(claudeStreamLine))
+		}
 	case "kimi":
 		runCLI(ctx, s, cwd, "kimi", kimiArgs(req), newCLIParser(kimiStreamLine))
 	case "qwen":

@@ -66,6 +66,7 @@ func main() {
 	mux.HandleFunc("/api/v1/sessions", auth(handleSessions))
 	mux.HandleFunc("/api/v1/sessions/", auth(handleSessionSub))
 	mux.HandleFunc("/api/v1/chat", auth(handleChat))
+	mux.HandleFunc("/api/v1/permission", auth(handlePermission))
 
 	// ---- static SPA (unauthenticated; contains no data) ----
 	sub, _ := fs.Sub(webFS, "web")
@@ -204,6 +205,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"name":    "LLM Web",
 		"version": "1.0.0",
+		"bypass":  bypassPermissions, // si false, le mode "auto" est refusé par le serveur
 	})
 }
 
