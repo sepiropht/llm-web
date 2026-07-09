@@ -20,7 +20,7 @@ WorkingDirectory=$REPO_DIR
 EnvironmentFile=-%h/.llm-web/env
 EnvironmentFile=-%h/.llm-web/keys.env
 Environment=PATH=%h/.local/bin:%h/.kimi-code/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=$REPO_DIR/llmweb -port $PORT -host $HOST -no-auth
+ExecStart=$REPO_DIR/llmweb -port $PORT -host $HOST -no-auth -bypass-permissions
 Restart=always
 RestartSec=2
 

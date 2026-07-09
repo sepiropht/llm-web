@@ -25,6 +25,7 @@ var webFS embed.FS
 var providers []Provider
 var authToken string
 var trustPrivate bool
+var bypassPermissions bool
 
 // CGNAT : plage utilisée par les VPN maillés (netbird, tailscale).
 var cgnat = func() *net.IPNet { _, n, _ := net.ParseCIDR("100.64.0.0/10"); return n }()
@@ -34,9 +35,11 @@ func main() {
 	host := flag.String("host", "", "bind host; empty = 127.0.0.1 (this machine only), pass a value to expose")
 	token := flag.String("token", "", "auth token (generated if empty)")
 	noAuth := flag.Bool("no-auth", false, "skip the token for private/VPN clients (loopback, RFC1918, CGNAT 100.64/10); public clients still need it")
+	bypass := flag.Bool("bypass-permissions", false, "laisse les LLM exécuter les outils sans confirmation (--dangerously-skip-permissions / --yolo)")
 	flag.Parse()
 
 	trustPrivate = *noAuth
+	bypassPermissions = *bypass
 
 	if *token != "" {
 		authToken = *token

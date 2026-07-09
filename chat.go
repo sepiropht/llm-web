@@ -96,6 +96,12 @@ func claudeArgs(req chatRequest) []string {
 	// de chaque tour et l'UI reste figée jusqu'au bout.
 	args = append(args, "-p", req.Message,
 		"--output-format", "stream-json", "--verbose", "--include-partial-messages")
+	if bypassPermissions {
+		// --permission-mode bypassPermissions plutôt que --dangerously-skip-permissions :
+		// ce dernier a une barrière anti-sandbox qui l'ignore sous certains
+		// environnements (ex. service systemd), alors que le mode explicite mord.
+		args = append(args, "--permission-mode", "bypassPermissions")
+	}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}
@@ -107,6 +113,8 @@ func kimiArgs(req chatRequest) []string {
 	if req.NativeID != "" {
 		args = append(args, "-S", req.NativeID)
 	}
+	// Kimi refuse --yolo avec -p, et en mode -p il exécute déjà les outils sans
+	// confirmation (pas de canal interactif possible), donc rien à ajouter ici.
 	args = append(args, "-p", req.Message, "--output-format", "stream-json")
 	if req.Model != "" {
 		args = append(args, "-m", req.Model)
