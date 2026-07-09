@@ -289,6 +289,32 @@ func grokReasoning(raw json.RawMessage) string {
 	return strings.TrimSpace(sb.String())
 }
 
+// codexMessage extrait (rôle, texte) d'une ligne de rollout codex, à plat ou
+// enveloppée dans "payload". Renvoie ok=false pour tout ce qui n'est pas un
+// tour user/assistant porteur de texte.
+func codexMessage(raw []byte) (string, string, bool) {
+	var o map[string]json.RawMessage
+	if json.Unmarshal(raw, &o) != nil {
+		return "", "", false
+	}
+	if p, has := o["payload"]; has {
+		var inner map[string]json.RawMessage
+		if json.Unmarshal(p, &inner) == nil && len(inner) > 0 {
+			o = inner
+		}
+	}
+	var role string
+	json.Unmarshal(o["role"], &role)
+	if role != "user" && role != "assistant" {
+		return "", "", false
+	}
+	text := strings.TrimSpace(jsonToText(o["content"]))
+	if text == "" {
+		return "", "", false
+	}
+	return role, text, true
+}
+
 func rawToString(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

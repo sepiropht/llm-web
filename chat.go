@@ -102,6 +102,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 	case "kimi":
 		runCLI(ctx, s, cwd, "kimi", kimiArgs(req), newCLIParser(kimiStreamLine))
+	case "codex":
+		// codex n'expose pas de flux JSON stable en headless : on streame sa
+		// sortie texte telle quelle.
+		args := []string{"exec"}
+		if bypassPermissions {
+			args = append(args, "--full-auto")
+		}
+		runCLI(ctx, s, cwd, "codex", append(args, req.Message), plainLine)
 	case "qwen":
 		runCLI(ctx, s, cwd, "qwen", []string{req.Message}, plainLine)
 	case "grok":

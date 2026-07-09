@@ -52,8 +52,9 @@ func main() {
 	providers = []Provider{
 		NewClaudeProvider(),
 		NewKimiProvider(),
-		NewGeminiProvider(),
 		NewGrokProvider(),
+		NewCodexProvider(),
+		NewGeminiProvider(),
 		NewMistralProvider(),
 		NewQwenProvider(),
 	}
@@ -110,15 +111,38 @@ func banner(host string, port int) {
 	url := fmt.Sprintf("http://%s:%d/#token=%s", host, port, authToken)
 	fmt.Printf("\n  \033[38;5;213m▐█▛█▛█▌\033[0m  LLM Web — toutes tes sessions, tous tes LLM\n")
 	fmt.Printf("  \033[38;5;213m▐█████▌\033[0m  port %d\n\n", port)
-	names := []string{}
+
+	// Rapport de détection : ce qui compte à l'installation, c'est de voir d'un
+	// coup d'œil quel agent est utilisable et pourquoi.
+	found := 0
+	fmt.Printf("  \033[2m%-9s %-10s %-9s %s\033[0m\n", "AGENT", "SESSIONS", "CHAT", "REPRISE")
 	for _, p := range providers {
-		if p.Available() {
-			names = append(names, p.Name())
+		if !p.Available() {
+			continue
 		}
+		found++
+		fmt.Printf("  %-9s %-10s %-9s %s\n", p.Name(),
+			yesNo(p.HasSessions()), yesNo(p.CanChat()), yesNo(p.CanResume()))
 	}
-	fmt.Printf("  Providers: %s\n", strings.Join(names, ", "))
-	fmt.Printf("  URL:       %s\n", url)
+	if found == 0 {
+		fmt.Printf("  \033[33mAucun agent détecté.\033[0m Installe claude, kimi, grok, codex ou gemini,\n")
+		fmt.Printf("  ou définis GROK_API_KEY / MISTRAL_API_KEY, puis relance.\n")
+	}
+	fmt.Printf("\n  URL:       %s\n", url)
+	if trustPrivate {
+		fmt.Printf("  Auth:      token (ignoré pour les clients privés/VPN)\n")
+	}
+	if bypassPermissions {
+		fmt.Printf("  \033[33mPermissions: mode Auto autorisé (les agents exécutent sans demander)\033[0m\n")
+	}
 	fmt.Printf("  Token:     %s\n\n", authToken)
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "oui"
+	}
+	return "—"
 }
 
 // ---------- auth ----------
@@ -183,19 +207,12 @@ type providerInfo struct {
 func handleProviders(w http.ResponseWriter, r *http.Request) {
 	items := []providerInfo{}
 	for _, p := range providers {
-		_, hasSess := p.(interface{ List() []Session })
-		hs := hasSess
-		// chat-only providers technically implement List but return nil; flag by name
-		switch p.Name() {
-		case "mistral", "qwen":
-			hs = false
-		}
 		items = append(items, providerInfo{
 			Name:      p.Name(),
 			Available: p.Available(),
 			CanChat:   p.CanChat(),
 			CanResume: p.CanResume(),
-			HasSess:   hs,
+			HasSess:   p.HasSessions(),
 		})
 	}
 	writeJSON(w, map[string]any{"items": items})

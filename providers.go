@@ -47,9 +47,17 @@ type Session struct {
 }
 
 // Provider is a source of conversations + optional chat capability.
+//
+// Sémantique de détection, pensée pour une installation quelconque :
+//   - Available()   : l'agent est pertinent ici = binaire présent OU sessions sur disque.
+//     Un agent fraîchement installé mais jamais lancé (pas de dossier de sessions)
+//     doit rester utilisable pour discuter.
+//   - HasSessions() : il y a un historique à parcourir.
+//   - CanChat()     : on peut lancer une conversation (binaire requis).
 type Provider interface {
 	Name() string
 	Available() bool
+	HasSessions() bool
 	CanResume() bool
 	CanChat() bool
 	List() []Session
@@ -130,10 +138,11 @@ type ClaudeProvider struct {
 func NewClaudeProvider() *ClaudeProvider {
 	return &ClaudeProvider{root: filepath.Join(home(), ".claude", "projects"), cache: newFileCache()}
 }
-func (p *ClaudeProvider) Name() string    { return "claude" }
-func (p *ClaudeProvider) Available() bool { _, err := os.Stat(p.root); return err == nil }
-func (p *ClaudeProvider) CanResume() bool { return binExists("claude") }
-func (p *ClaudeProvider) CanChat() bool   { return binExists("claude") }
+func (p *ClaudeProvider) Name() string      { return "claude" }
+func (p *ClaudeProvider) Available() bool   { return binExists("claude") || p.HasSessions() }
+func (p *ClaudeProvider) HasSessions() bool { return dirExists(p.root) }
+func (p *ClaudeProvider) CanResume() bool   { return binExists("claude") }
+func (p *ClaudeProvider) CanChat() bool     { return binExists("claude") }
 
 func (p *ClaudeProvider) List() []Session {
 	var files []string
@@ -282,10 +291,11 @@ type KimiProvider struct {
 func NewKimiProvider() *KimiProvider {
 	return &KimiProvider{root: filepath.Join(home(), ".kimi-code", "sessions"), cache: newFileCache()}
 }
-func (p *KimiProvider) Name() string    { return "kimi" }
-func (p *KimiProvider) Available() bool { _, err := os.Stat(p.root); return err == nil }
-func (p *KimiProvider) CanResume() bool { return binExists("kimi") }
-func (p *KimiProvider) CanChat() bool   { return binExists("kimi") }
+func (p *KimiProvider) Name() string      { return "kimi" }
+func (p *KimiProvider) Available() bool   { return binExists("kimi") || p.HasSessions() }
+func (p *KimiProvider) HasSessions() bool { return dirExists(p.root) }
+func (p *KimiProvider) CanResume() bool   { return binExists("kimi") }
+func (p *KimiProvider) CanChat() bool     { return binExists("kimi") }
 
 func (p *KimiProvider) List() []Session {
 	var dirs []string
@@ -438,10 +448,11 @@ type GeminiProvider struct{ root string }
 func NewGeminiProvider() *GeminiProvider {
 	return &GeminiProvider{root: filepath.Join(home(), ".gemini", "tmp")}
 }
-func (p *GeminiProvider) Name() string    { return "gemini" }
-func (p *GeminiProvider) Available() bool { _, err := os.Stat(p.root); return err == nil }
-func (p *GeminiProvider) CanResume() bool { return false }
-func (p *GeminiProvider) CanChat() bool   { return binExists("gemini") }
+func (p *GeminiProvider) Name() string      { return "gemini" }
+func (p *GeminiProvider) Available() bool   { return binExists("gemini") || p.HasSessions() }
+func (p *GeminiProvider) HasSessions() bool { return dirExists(p.root) }
+func (p *GeminiProvider) CanResume() bool   { return false }
+func (p *GeminiProvider) CanChat() bool     { return binExists("gemini") }
 
 type geminiLogEntry struct {
 	SessionID string          `json:"sessionId"`
@@ -536,10 +547,11 @@ type GrokProvider struct {
 func NewGrokProvider() *GrokProvider {
 	return &GrokProvider{root: filepath.Join(home(), ".grok", "sessions"), cache: newFileCache()}
 }
-func (p *GrokProvider) Name() string    { return "grok" }
-func (p *GrokProvider) Available() bool { return binExists("grok") }
-func (p *GrokProvider) CanResume() bool { return binExists("grok") }
-func (p *GrokProvider) CanChat() bool   { return binExists("grok") }
+func (p *GrokProvider) Name() string      { return "grok" }
+func (p *GrokProvider) Available() bool   { return binExists("grok") || p.HasSessions() }
+func (p *GrokProvider) HasSessions() bool { return dirExists(p.root) }
+func (p *GrokProvider) CanResume() bool   { return binExists("grok") }
+func (p *GrokProvider) CanChat() bool     { return binExists("grok") }
 
 func (p *GrokProvider) List() []Session {
 	var dirs []string
@@ -651,6 +663,122 @@ func (p *GrokProvider) Messages(dir string) ([]Message, error) {
 }
 
 // ============================================================
+// Codex (OpenAI CLI)  ~/.codex/sessions/**/rollout-*.jsonl
+// ============================================================
+//
+// Le format de rollout de codex a bougé selon les versions (ligne à plat, ou
+// enveloppée dans "payload"). On parse donc défensivement : on cherche un rôle
+// user/assistant puis on extrait le texte quelle que soit la forme du contenu.
+// Une ligne non reconnue est ignorée, jamais fatale.
+
+type CodexProvider struct {
+	root  string
+	cache *fileCache
+}
+
+func NewCodexProvider() *CodexProvider {
+	return &CodexProvider{root: filepath.Join(home(), ".codex", "sessions"), cache: newFileCache()}
+}
+func (p *CodexProvider) Name() string      { return "codex" }
+func (p *CodexProvider) Available() bool   { return binExists("codex") || p.HasSessions() }
+func (p *CodexProvider) HasSessions() bool { return dirExists(p.root) }
+func (p *CodexProvider) CanResume() bool   { return false }
+func (p *CodexProvider) CanChat() bool     { return binExists("codex") }
+
+func (p *CodexProvider) List() []Session {
+	var files []string
+	filepath.WalkDir(p.root, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".jsonl") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return parseConcurrent(files, func(path string, mtime int64) (Session, bool) {
+		if s, ok := p.cache.get(path, mtime); ok {
+			return s, true
+		}
+		s, ok := p.summarize(path, mtime)
+		if ok {
+			p.cache.put(path, mtime, s)
+		}
+		return s, ok
+	})
+}
+
+func (p *CodexProvider) summarize(path string, mtime int64) (Session, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Session{}, false
+	}
+	defer f.Close()
+	var firstUser, lastUser string
+	count := 0
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+	for sc.Scan() {
+		role, text, ok := codexMessage(sc.Bytes())
+		if !ok {
+			continue
+		}
+		count++
+		if role == "user" {
+			if firstUser == "" {
+				firstUser = text
+			}
+			lastUser = text
+		}
+	}
+	if count == 0 {
+		return Session{}, false
+	}
+	info, _ := os.Stat(path)
+	upd := info.ModTime()
+	title := truncate(firstUser, 80)
+	if title == "" {
+		title = "(sans titre)"
+	}
+	// rollout-<timestamp>-<uuid>.jsonl → on garde l'uuid comme id natif
+	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	native := base
+	if i := strings.LastIndexByte(base, '-'); i >= 0 && len(base)-i > 8 {
+		native = base[i+1:]
+	}
+	return Session{
+		ID:           encodeID("codex", path),
+		Provider:     "codex",
+		NativeID:     native,
+		Title:        title,
+		Project:      filepath.Base(filepath.Dir(path)),
+		CreatedAt:    upd.Format(time.RFC3339),
+		UpdatedAt:    upd.Format(time.RFC3339),
+		LastPrompt:   truncate(lastUser, 160),
+		MessageCount: count,
+		updatedUnix:  upd.Unix(),
+	}, true
+}
+
+func (p *CodexProvider) Messages(path string) ([]Message, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var out []Message
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1024*1024), 32*1024*1024)
+	i := 0
+	for sc.Scan() {
+		role, text, ok := codexMessage(sc.Bytes())
+		if !ok {
+			continue
+		}
+		i++
+		out = append(out, Message{ID: itoa(i), Role: role, Parts: []Part{{Type: "text", Text: text}}})
+	}
+	return out, nil
+}
+
+// ============================================================
 // Chat-only providers (no browsable local sessions)
 // ============================================================
 
@@ -659,11 +787,12 @@ type chatOnlyProvider struct {
 	canChat func() bool
 }
 
-func (p *chatOnlyProvider) Name() string    { return p.name }
-func (p *chatOnlyProvider) Available() bool { return p.canChat() }
-func (p *chatOnlyProvider) CanResume() bool { return false }
-func (p *chatOnlyProvider) CanChat() bool   { return p.canChat() }
-func (p *chatOnlyProvider) List() []Session { return nil }
+func (p *chatOnlyProvider) Name() string      { return p.name }
+func (p *chatOnlyProvider) Available() bool   { return p.canChat() }
+func (p *chatOnlyProvider) HasSessions() bool { return false }
+func (p *chatOnlyProvider) CanResume() bool   { return false }
+func (p *chatOnlyProvider) CanChat() bool     { return p.canChat() }
+func (p *chatOnlyProvider) List() []Session   { return nil }
 func (p *chatOnlyProvider) Messages(string) ([]Message, error) {
 	return nil, nil
 }
